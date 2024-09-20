@@ -1,0 +1,197 @@
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import tkinter as tk
+from tkinter import messagebox
+
+# Classe Produto para representar um item no estoque
+class Produto:
+    def __init__(self, nome, quantidade, preco):
+        self.nome = nome
+        self.quantidade = quantidade
+        self.preco = preco
+
+# Classe Estoque para gerenciar a operação de estoque
+class Estoque:
+    def __init__(self):
+        self.produtos = {}
+        self.historico = pd.DataFrame(columns=['Data', 'Produto', 'Movimento', 'Quantidade'])
+
+    def adicionar_produto(self, nome, quantidade, preco):
+        if nome in self.produtos:
+            self.produtos[nome].quantidade += quantidade
+        else:
+            self.produtos[nome] = Produto(nome, quantidade, preco)
+        self.registrar_movimento(nome, 'Entrada', quantidade)
+
+    def remover_produto(self, nome, quantidade):
+        if nome in self.produtos and self.produtos[nome].quantidade >= quantidade:
+            self.produtos[nome].quantidade -= quantidade
+            self.registrar_movimento(nome, 'Saída', quantidade)
+        else:
+            print(f"Estoque insuficiente ou produto {nome} não encontrado.")
+
+    def registrar_movimento(self, nome, movimento, quantidade, data_atual=None):
+        if data_atual is None:
+            data_atual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        novo_registro = pd.DataFrame({
+            'Data': [data_atual],
+            'Produto': [nome],
+            'Movimento': [movimento],
+            'Quantidade': [quantidade]
+        })
+        self.historico = pd.concat([self.historico, novo_registro], ignore_index=True)
+
+    def obter_estoque(self):
+        estoque_str = "\n".join([f"Produto: {nome} - Quantidade: {produto.quantidade} - Preço: {produto.preco}"
+                                 for nome, produto in self.produtos.items()])
+        return estoque_str if estoque_str else "Estoque vazio."
+
+    def obter_historico(self):
+        return self.historico.to_string(index=False) if not self.historico.empty else "Histórico vazio."
+
+# Função para previsibilidade de demanda com média móvel simples
+def prever_demanda(historico, produto, periodo=7):
+    dados_produto = historico[historico['Produto'] == produto]
+    dados_produto['Data'] = pd.to_datetime(dados_produto['Data'])
+    dados_produto = dados_produto.set_index('Data')
+    demanda_por_dia = dados_produto[dados_produto['Movimento'] == 'Saída'].resample('D').sum()
+
+    if len(demanda_por_dia) >= periodo:
+        demanda_media = demanda_por_dia['Quantidade'].rolling(window=periodo).mean().iloc[-1]
+        return f"Previsão de demanda para o produto {produto}: {demanda_media:.2f} unidades por dia."
+    else:
+        return f"Dados insuficientes para prever a demanda de {produto}."
+
+# Interface gráfica usando Tkinter
+class EstoqueApp:
+    def __init__(self, estoque):
+        self.estoque = estoque
+        self.root = tk.Tk()
+        self.root.title("Registro de Vendas")
+        self.root.geometry("560x280")  # Redimensionando a tela
+
+        # Centralizar widgets
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
+
+        # Widgets
+        self.label_produto = tk.Label(self.root, text="Produto:")
+        self.label_produto.grid(row=0, column=0, sticky='e')
+
+        self.entry_produto = tk.Entry(self.root)
+        self.entry_produto.grid(row=0, column=1, sticky='w')
+
+        self.label_quantidade = tk.Label(self.root, text="Quantidade:")
+        self.label_quantidade.grid(row=1, column=0, sticky='e')
+
+        self.entry_quantidade = tk.Entry(self.root)
+        self.entry_quantidade.grid(row=1, column=1, sticky='w')
+
+        self.button_vender = tk.Button(self.root, text="Registrar Venda", command=self.registrar_venda)
+        self.button_vender.grid(row=2, column=0, columnspan=2)
+
+        self.button_exibir_estoque = tk.Button(self.root, text="Exibir Estoque", command=self.exibir_estoque)
+        self.button_exibir_estoque.grid(row=3, column=0, columnspan=2)
+
+        self.button_exibir_historico = tk.Button(self.root, text="Exibir Histórico", command=self.exibir_historico)
+        self.button_exibir_historico.grid(row=4, column=0, columnspan=2)
+
+        self.button_exibir_previsibilidade = tk.Button(self.root, text="Exibir Previsibilidade", command=self.exibir_previsibilidade)
+        self.button_exibir_previsibilidade.grid(row=5, column=0, columnspan=2)
+
+        self.label_produto_saldo = tk.Label(self.root, text="Produto para Adicionar Saldo:")
+        self.label_produto_saldo.grid(row=6, column=0, sticky='e')
+
+        self.entry_produto_saldo = tk.Entry(self.root)
+        self.entry_produto_saldo.grid(row=6, column=1, sticky='w')
+
+        self.label_novo_saldo = tk.Label(self.root, text="Adicionar Saldo:")
+        self.label_novo_saldo.grid(row=7, column=0, sticky='e')
+
+        self.entry_novo_saldo = tk.Entry(self.root)
+        self.entry_novo_saldo.grid(row=7, column=1, sticky='w')
+
+        self.button_adicionar_saldo = tk.Button(self.root, text="Adicionar ao Estoque", command=self.adicionar_saldo)
+        self.button_adicionar_saldo.grid(row=8, column=0, columnspan=2)
+
+        self.root.mainloop()
+
+    def registrar_venda(self):
+        produto = self.entry_produto.get()
+        quantidade = self.entry_quantidade.get()
+
+        try:
+            quantidade = int(quantidade)
+            if produto in self.estoque.produtos:
+                self.estoque.remover_produto(produto, quantidade)
+                messagebox.showinfo("Sucesso", f"Venda de {quantidade} unidades do produto '{produto}' registrada!")
+            else:
+                messagebox.showerror("Erro", f"Produto '{produto}' não encontrado no estoque!")
+        except ValueError:
+            messagebox.showerror("Erro", "A quantidade deve ser um número inteiro.")
+
+    def exibir_estoque(self):
+        estoque_str = self.estoque.obter_estoque()
+        self.mostrar_popup("Estoque Atual", estoque_str)
+
+    def exibir_historico(self):
+        historico_str = self.estoque.obter_historico()
+        self.mostrar_popup("Histórico de Movimentações", historico_str)
+
+    def exibir_previsibilidade(self):
+        previsibilidade_str = ""
+        for produto in self.estoque.produtos:
+            previsibilidade_str += prever_demanda(self.estoque.historico, produto) + "\n"
+        self.mostrar_popup("Previsibilidade de Demanda", previsibilidade_str)
+
+    def adicionar_saldo(self):
+        produto = self.entry_produto_saldo.get()
+        novo_saldo = self.entry_novo_saldo.get()
+
+        try:
+            novo_saldo = int(novo_saldo)
+            if produto in self.estoque.produtos:
+                self.estoque.adicionar_produto(produto, novo_saldo, self.estoque.produtos[produto].preco)
+                messagebox.showinfo("Sucesso", f"Adicionado {novo_saldo} unidades ao estoque do produto '{produto}'!")
+            else:
+                messagebox.showerror("Erro", f"Produto '{produto}' não encontrado no estoque!")
+        except ValueError:
+            messagebox.showerror("Erro", "O saldo deve ser um número inteiro.")
+
+    def mostrar_popup(self, titulo, mensagem):
+        popup = tk.Toplevel(self.root)
+        popup.title(titulo)
+        popup.geometry("500x500")
+
+        text_area = tk.Text(popup, wrap='word')
+        text_area.insert(tk.END, mensagem)
+        text_area.configure(state='disabled')  # Torna o campo apenas leitura
+        text_area.pack(expand=True, fill='both')
+
+        button_fechar = tk.Button(popup, text="Fechar", command=popup.destroy)
+        button_fechar.pack()
+
+# Função para gerar vendas falsas
+def gerar_vendas_falsas(estoque):
+    produtos = ['Fantasia 1', 'Fantasia 2', 'Fantasia 3', 'Fantasia 4', 'Fantasia 5']
+    data_atual = datetime.now()
+    for i in range(10):  # 10 dias de vendas
+        for produto in produtos:
+            quantidade_vendida = np.random.randint(1, 5)  # Vendas de 1 a 5 unidades por dia
+            data_falsa = (data_atual - timedelta(days=i)).strftime("%Y-%m-%d %H:%M:%S")
+            estoque.registrar_movimento(produto, 'Saída', quantidade_vendida, data_falsa)
+
+# Exemplo de uso
+estoque = Estoque()
+estoque.adicionar_produto('Fantasia 1', 100, 49.90)
+estoque.adicionar_produto('Fantasia 2', 100, 39.90)
+estoque.adicionar_produto('Fantasia 3', 100, 59.90)
+estoque.adicionar_produto('Fantasia 4', 100, 69.90)
+estoque.adicionar_produto('Fantasia 5', 100, 79.90)
+
+# Gerar vendas falsas de 10 dias
+gerar_vendas_falsas(estoque)
+
+# Iniciar interface gráfica
+app = EstoqueApp(estoque)
